@@ -55,11 +55,9 @@ class EncoderDecoder(nn.Module):
         
         tgt_embeddings = torch.zeros(B, V, E).to(device)
         tgt_embeddings[batch_indices_valid, sequence_indices_valid, :] = whole_embeddings[batch_indices_valid, tgt_valid, :]
-        
         tgt_embeddings = self.decoder_pe(tgt_embeddings)
-        visited_count = tgt.shape[-1]
-        visited_mask = visited_mask.unsqueeze(1).repeat(1, visited_count, 1)
-        return self.decoder(tgt_embeddings, memory, tgt_mask, ~visited_mask)
+        
+        return self.decoder(tgt_embeddings, memory, tgt_mask)
 
 class Generator(nn.Module):
     "Define standard linear + softmax generation step."
@@ -132,9 +130,9 @@ class Decoder(nn.Module):
         self.layers = clones(layer, N)
         self.norm = nn.LayerNorm(layer.size)
 
-    def forward(self, x, memory, tgt_mask, visited_mask):
+    def forward(self, x, memory, tgt_mask):
         for layer in self.layers:
-            x = layer(x, memory, tgt_mask, visited_mask)
+            x = layer(x, memory, tgt_mask)
         return self.norm(x)
 
 class DecoderLayer(nn.Module):
@@ -148,11 +146,11 @@ class DecoderLayer(nn.Module):
         self.feed_forward = feed_forward
         self.sublayer = clones(SublayerConnection(size, dropout), 3)
 
-    def forward(self, x, memory, tgt_mask, visited_mask):
+    def forward(self, x, memory, tgt_mask):
         "Follow Figure 1 (right) for connections."
         m = memory
         x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, tgt_mask))
-        x = self.sublayer[1](x, lambda x: self.src_attn(x, m, m, visited_mask))
+        x = self.sublayer[1](x, lambda x: self.src_attn(x, m, m))
         return self.sublayer[2](x, self.feed_forward)
 
 def subsequent_mask(size):
@@ -317,7 +315,8 @@ def make_model(src_sz, tgt_sz, N=6, d_model=128, d_ff=512, h=8, dropout=0.1):
         decoder=Decoder(DecoderLayer(d_model, c(attn), c(attn), c(ff), dropout), N),
         src_embed=Embeddings(d_model, "encoder"),
         encoder_pe=EncoderPositionalEncoding(d_model, 2, dropout),
-        tgt_embed=Embeddings(d_model, "decoder"),
+        # tgt_embed=Embeddings(d_model, "decoder"),
+        tgt_embed=Embeddings(d_model, "encoder"),
         decoder_pe=DecoderPositionalEncoding(d_model, dropout, 10000),
         generator=Generator(d_model, tgt_sz),
     )

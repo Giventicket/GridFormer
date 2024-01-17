@@ -28,8 +28,10 @@ class TSPDataset(Dataset):
         self.tsp_tours = []
 
         self._readDataFile()
+        
         # self.tsp_instances = self.tsp_instances[:10] # delete
         # self.tsp_tours = self.tsp_tours[:10] # delete
+        
         self.raw_data_size = len(self.tsp_instances)
         self.max_node_size = len(self.tsp_tours[0])
 
@@ -125,7 +127,7 @@ def collate_fn(batch):
 
 if __name__ == "__main__":
     train_dataset = TSPDataset("./tsp20_test_concorde.txt")
-    train_dataloader = DataLoader(train_dataset, batch_size=4, shuffle=True, collate_fn=collate_fn)
+    train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=True, collate_fn=collate_fn)
 
     for tsp_instances in tqdm(train_dataloader):
         print("tsp_instances")

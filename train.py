@@ -41,9 +41,11 @@ class TSPModel(pl.LightningModule):
             h=cfg.h, 
             dropout=cfg.dropout
         )
+        self.automatic_optimization = False
         criterion = LabelSmoothing(size=cfg.node_size, smoothing=cfg.smoothing)
         self.loss_compute = SimpleLossCompute(self.model.generator, criterion, cfg.node_size)
         self.save_hyperparameters(cfg)  # save config file with pytorch lightening
+        self.train_outputs = []
         self.val_outputs = []
 
     def configure_optimizers(self):
@@ -52,7 +54,7 @@ class TSPModel(pl.LightningModule):
             optimizer=optimizer,
             lr_lambda=lambda step: rate(step, model_size=self.cfg.d_model, factor=self.cfg.factor, warmup=self.cfg.warmup),
         )
-        return [optimizer], [{"scheduler": lr_scheduler, "interval": "epoch"}]
+        return {'optimizer': optimizer, 'lr_scheduler': lr_scheduler}
 
     def train_dataloader(self):
         train_dataset = TSPDataset(self.cfg.train_data_path)
@@ -75,7 +77,7 @@ class TSPModel(pl.LightningModule):
             pin_memory=True
         )
         return val_dataloader
-
+    
     def training_step(self, batch):
         src = batch["src"]
         tgt = batch["tgt"]
@@ -84,26 +86,49 @@ class TSPModel(pl.LightningModule):
         ntokens = batch["ntokens"]
         tgt_mask = batch["tgt_mask"]
 
+        opt = self.optimizers() # manual backprop
+        opt.zero_grad() # manual backprop
+        
         self.model.train()
         out = self.model(src, tgt, visited_mask, tgt_mask) # [B, V, E]
-        loss, loss_node = self.loss_compute(out, tgt_y, ntokens) # [B, V, E], [B, V]
-        loss = loss.mean().item()
-        loss_node = loss_node.mean()
+        loss = self.loss_compute(out, tgt, tgt_y, ntokens) # [B, V, E], [B, V]
 
-        self.log(
-            name="train_loss",
-            value=loss,
-            prog_bar=True,
-        )
+        training_step_outputs = [l.item() for l in loss]
+        self.train_outputs.extend(training_step_outputs)
 
-        assert torch.isnan(loss_node).sum() == 0, print("loss_node is nan!")
+        loss = loss.mean()
+        self.manual_backward(loss) # manual backprop
+        opt.step() # manual backprop
 
-        return {"loss": loss_node}
+        if self.trainer.is_global_zero:
+            self.log(
+                name = "train_loss",
+                value = loss,
+                prog_bar = True,
+            )
+        
+        return {"loss": loss}
 
-    def train_epoch_end(self, outputs):
-        outputs = torch.as_tensor([output["loss"] for output in outputs])
-        self.train_loss_mean = outputs.mean().item()
-
+    def on_train_epoch_start(self) -> None:
+        if self.trainer.is_global_zero:
+            self.train_start_time = time.time()
+    
+    def on_train_epoch_end(self):
+        outputs = self.all_gather(self.train_outputs)
+        self.train_outputs.clear()
+        
+        lr_scheduler = self.lr_schedulers() # manual backprop
+        lr_scheduler.step() # manual backprop
+        
+        if self.trainer.is_global_zero:
+            train_loss = torch.stack(outputs).mean()
+            train_time = time.time() - self.train_start_time
+            self.print(
+                f"Epoch {self.current_epoch}: ",
+                "train_loss={:.03f}, ".format(train_loss),
+                "train time={:.03f}".format(train_time),
+            )
+            
     def validate_all(self, batch):
         src = batch["src"]
         tgt = batch["tgt"]
@@ -114,58 +139,46 @@ class TSPModel(pl.LightningModule):
         
         self.model.eval()
         out = self.model(src, tgt, visited_mask, tgt_mask)
-        loss, loss_node = self.loss_compute(out, tgt_y, ntokens)
-        loss = loss.mean().item()
-        loss_node = loss_node.mean()
-
-        self.log(
-            name="val_loss",
-            value=loss,
-            prog_bar=True,
-        )
-
-        assert torch.isnan(loss_node).sum() == 0, print("loss_node is nan!")
-
-        return {"loss": loss_node}
+        loss = self.loss_compute(out, tgt, tgt_y, ntokens) # [B, V, E], [B, V]
+        
+        return loss
 
     def validation_step(self, batch, batch_idx):
         with torch.no_grad():
-            output = self.validate_all(batch)
-        self.val_outputs.append(output)
-        return output
+            loss = self.validate_all(batch)
 
-    def validation_step_end(self, batch_parts):
-        return batch_parts
+        validation_step_outputs = [l.item() for l in loss]
+        self.val_outputs.extend(validation_step_outputs)
+        return {"loss": loss.mean()}
 
     def on_validation_epoch_start(self) -> None:
-        self.validation_start_time = time.time()
+        if self.trainer.is_global_zero:
+            self.validation_start_time = time.time()
 
-    # TODO: all gather로 여러 gpu의 결과 모아서 구현하기
     def on_validation_epoch_end(self):
-        loss = [item["loss"] for item in self.val_outputs]
-        self.val_outputs = []
-
-        validation_time = time.time() - self.validation_start_time
-        val_loss = sum(loss) / len(loss)
-        self.log_dict(
-            {
-                "val_loss(epoch)": val_loss
-            },
-            on_epoch=True,
-            on_step=False,
+        outputs = self.all_gather(self.val_outputs)
+        self.val_outputs.clear()
+        val_loss = torch.stack(outputs).mean()
+        
+        self.log(
+            name = "val_loss",
+            value = val_loss,
+            prog_bar = True,
         )
-
-        self.print(
-            f"\nEpoch {self.current_epoch}: ",
-            "val_loss(epoch)={:.03f}, ".format(val_loss),
-            "validation time={:.03f}".format(validation_time),
-        )
-
+        
+        if self.trainer.is_global_zero:
+            validation_time = time.time() - self.validation_start_time
+            self.print(
+                f"\nEpoch {self.current_epoch}: ",
+                "val_loss={:.03f}, ".format(val_loss),
+                "validation time={:.03f}".format(validation_time),
+            )
+            
 if __name__ == "__main__":
     cfg = OmegaConf.create({
-        "train_data_path": "./tsp50_test_concorde.txt",
-        "val_data_path": "./tsp50_test_concorde.txt",
-        "node_size": 50,
+        "train_data_path": "./tsp20_test_concorde.txt",
+        "val_data_path": "./tsp20_test_concorde.txt",
+        "node_size": 20,
         "train_batch_size": 64,
         "val_batch_size": 64,
         "resume_checkpoint": None,
@@ -188,7 +201,7 @@ if __name__ == "__main__":
     tsp_model = TSPModel(cfg)
 
     checkpoint_callback = ModelCheckpoint(
-        monitor = "val_loss(epoch)",
+        monitor = "val_loss",
         filename = f'TSP{cfg.node_size}-' + "{epoch:02d}-{val_loss:.4f}",
         save_top_k=3,
         mode="min",
@@ -215,4 +228,3 @@ if __name__ == "__main__":
 
     # training and save ckpt
     trainer.fit(tsp_model)
-    trainer.save_checkpoint("checkpoint.ckpt")
