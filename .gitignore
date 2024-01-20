@@ -2,3 +2,4 @@
 logs/
 trained_model_and_data/
 __pycache__/
+lightning_logs/
