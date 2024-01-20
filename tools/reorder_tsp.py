@@ -1,3 +1,5 @@
+# https://github.com/Edward-Sun/DIFUSCO/blob/main/difusco/co_datasets/tsp_image_dataset.py
+
 import cv2
 import numpy as np
 import torch

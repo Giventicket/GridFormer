@@ -1,3 +1,5 @@
+# https://github.com/Edward-Sun/DIFUSCO/blob/main/data/generate_tsp_data.py
+
 import argparse
 import pprint as pp
 import time
