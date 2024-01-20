@@ -9,22 +9,8 @@ class SimpleLossCompute:
         self.criterion = criterion
         self.node_size = node_size
 
-    def __call__(self, x, y, y_t, norm):
-        device = x.device
-        B, V = y.shape
-        visited_mask = torch.zeros(B, V, self.node_size, dtype=torch.bool, device = device) # [B, V, N]
-        for b in range(B):
-            for v in range(V):
-                visited_mask[b, v: , y[b, v]] = True # visited
-        valid_mask = (y == -1)
-        batch_indices = torch.arange(B, device = device).unsqueeze(-1).expand_as(y) # [B, V]
-        sequence_indices = torch.arange(V, device = device).unsqueeze(0).expand_as(y) # [B, V]
-        batch_indices_valid = batch_indices[valid_mask]
-        sequence_indices_valid = sequence_indices[valid_mask]
-        visited_mask[batch_indices_valid, sequence_indices_valid, :] = False # paddings
-        
+    def __call__(self, x, y_t, visited_mask, norm):
         x = self.generator(x, visited_mask)
-        
         sloss = self.criterion(x.reshape(-1, self.node_size), y_t.reshape(-1), visited_mask.reshape(-1, self.node_size)) / norm
         return sloss
 

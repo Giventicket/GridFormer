@@ -25,20 +25,20 @@ class EncoderDecoder(nn.Module):
         self.decoder_pe = decoder_pe
         self.generator = generator
 
-    def forward(self, src, tgt, visited_mask, tgt_mask):
+    def forward(self, src, tgt, tgt_mask):
         "Take in and process masked src and target sequences."
-        return self.decode(self.encode(src), src, tgt, visited_mask, tgt_mask)
+        return self.decode(self.encode(src), src, tgt, tgt_mask)
 
     def encode(self, src):
         """
         src: [B, node_size, 2], no need for src_mask
         """
-        embeddings = self.src_embed(src)
-        embeddings = self.encoder_pe(embeddings, src)
-        return self.encoder(embeddings)
+        src_embeddings = self.src_embed(src)
+        src_embeddings = self.encoder_pe(src_embeddings, src)
+        return self.encoder(src_embeddings)
 
-    def decode(self, memory, src, tgt, visited_mask, tgt_mask):
-        whole_embeddings = self.tgt_embed(src, visited_mask)
+    def decode(self, memory, src, tgt, tgt_mask):
+        whole_embeddings = self.tgt_embed(src)
         whole_embeddings = self.encoder_pe(whole_embeddings, src)
         
         B, N, E = whole_embeddings.shape

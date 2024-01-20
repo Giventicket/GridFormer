@@ -90,8 +90,8 @@ class TSPModel(pl.LightningModule):
         opt.zero_grad() # manual backprop
         
         self.model.train()
-        out = self.model(src, tgt, visited_mask, tgt_mask) # [B, V, E]
-        loss = self.loss_compute(out, tgt, tgt_y, ntokens) # [B, V, E], [B, V]
+        out = self.model(src, tgt, tgt_mask) # [B, V, E]
+        loss = self.loss_compute(out, tgt_y, visited_mask, ntokens) # [B, V, E], [B, V]
 
         training_step_outputs = [l.item() for l in loss]
         self.train_outputs.extend(training_step_outputs)
@@ -138,8 +138,8 @@ class TSPModel(pl.LightningModule):
         tgt_mask = batch["tgt_mask"]
         
         self.model.eval()
-        out = self.model(src, tgt, visited_mask, tgt_mask)
-        loss = self.loss_compute(out, tgt, tgt_y, ntokens) # [B, V, E], [B, V]
+        out = self.model(src, tgt, tgt_mask)
+        loss = self.loss_compute(out, tgt_y, visited_mask, ntokens) # [B, V, E], [B, V]
         
         return loss
 
@@ -179,11 +179,11 @@ if __name__ == "__main__":
         "train_data_path": "./tsp20_test_concorde.txt",
         "val_data_path": "./tsp20_test_concorde.txt",
         "node_size": 20,
-        "train_batch_size": 64,
-        "val_batch_size": 64,
+        "train_batch_size": 16,
+        "val_batch_size": 16,
         "resume_checkpoint": None,
         "gpus": [0, 1, 2, 3],
-        "max_epochs": 20,
+        "max_epochs": 1000,
         "num_layers": 6,
         "d_model": 128,
         "d_ff": 512,

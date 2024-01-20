@@ -1,5 +1,7 @@
 import torch
 from torch.utils.data import DataLoader, Dataset
+from torch.nn.utils.rnn import pad_sequence
+
 from model import subsequent_mask
 
 from tqdm import tqdm
@@ -76,15 +78,16 @@ class TSPDataset(Dataset):
     def _process(self):
         N = len(self.tsp_instances[0])
         for tsp_instance, tsp_tour in tqdm(zip(self.tsp_instances, self.tsp_tours)):
-            for ntoken in range(1, len(tsp_tour)):
-                self.ntokens.append(torch.LongTensor([ntoken]))
-                self.src.append(tsp_instance)
-                self.tgt.append(tsp_tour[0:ntoken])
+            ntoken = len(tsp_tour) - 1
+            self.ntokens.append(torch.LongTensor([ntoken]))
+            self.src.append(tsp_instance)
+            self.tgt.append(tsp_tour[0:ntoken])
 
-                mask = [(idx in self.tgt[-1]) for idx in range(N)]
-                mask = torch.BoolTensor(mask)
-                self.visited_mask.append(mask)
-                self.tgt_y.append(tsp_tour[1 : ntoken + 1])
+            mask = torch.zeros(ntoken, self.max_node_size, dtype=torch.bool) # [V, N]
+            for v in range(ntoken):
+                mask[v: , self.tgt[-1][v]] = True # visited
+            self.visited_mask.append(mask)
+            self.tgt_y.append(tsp_tour[1 : ntoken + 1])
         return
 
     def __len__(self):
@@ -104,7 +107,7 @@ def make_tgt_mask(tgt):
 def collate_fn(batch):
     src = [ele[0] for ele in batch]
     tgt = [ele[1] for ele in batch]
-    visited_mask = [ele[2] for ele in batch]
+    visited_mask = pad_sequence([ele[2] for ele in batch], batch_first=True, padding_value=False)
     tgt_y = [ele[3] for ele in batch]
     ntokens = [ele[4] for ele in batch]
     
@@ -118,7 +121,7 @@ def collate_fn(batch):
     return {
         "src": torch.stack(src, dim=0),
         "tgt": tgt,
-        "visited_mask": torch.stack(visited_mask, dim=0),
+        "visited_mask": visited_mask,
         "tgt_y": torch.stack(tgt_y, dim=0),
         "ntokens": torch.stack(ntokens, dim=0),
         "tgt_mask": make_tgt_mask(tgt),
@@ -127,10 +130,11 @@ def collate_fn(batch):
 
 if __name__ == "__main__":
     train_dataset = TSPDataset("./tsp20_test_concorde.txt")
-    train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=True, collate_fn=collate_fn)
+    train_dataloader = DataLoader(train_dataset, batch_size=4, shuffle=True, collate_fn=collate_fn)
 
     for tsp_instances in tqdm(train_dataloader):
         print("tsp_instances")
         pprint(tsp_instances)
         print()
         break
+            

@@ -66,7 +66,7 @@ class TSPModel(pl.LightningModule):
             for i in range(self.cfg.node_size - 1):
                 # memory, tgt, tgt_mask
                 tgt_mask = subsequent_mask(ys.size(1)).type(torch.bool).to(src.device)
-                out = self.model.decode(memory, src, ys, visited_mask, tgt_mask)
+                out = self.model.decode(memory, src, ys, tgt_mask)
                 prob = self.model.generator(out[:, -1], visited_mask)
                 _, next_word = torch.max(prob, dim=1)
                 
@@ -75,11 +75,16 @@ class TSPModel(pl.LightningModule):
         
         total = reduce((lambda x, y: x * y), ys.shape)
         correct = (ys == tsp_tours).sum()
-        print(ys)
-        print()
+        
         result = {"correct": correct, "total": total}
         
         self.test_outputs.append(result)
+        
+        if self.trainer.is_global_zero:
+            print(ys[0])
+            print(tsp_tours[0])
+            print(result)
+            print()
         
         return result
         
@@ -104,9 +109,9 @@ if __name__ == "__main__":
         "train_data_path": "./tsp20_test_concorde.txt",
         "val_data_path": "./tsp20_test_concorde.txt",
         "node_size": 20,
-        "train_batch_size": 16,
-        "val_batch_size": 16,
-        "resume_checkpoint": "/home/CycleFormer/logs/lightning_logs/version_0/checkpoints/TSP50-epoch=11-val_loss=7629.5786.ckpt",
+        "train_batch_size": 1,
+        "val_batch_size": 1,
+        "resume_checkpoint": "/home/CycleFormer/logs/lightning_logs/version_1/checkpoints/TSP20-epoch=378-val_loss=2.7153.ckpt",
         "gpus": [0, 1, 2, 3],
         "max_epochs": 20,
         "num_layers": 6,
@@ -123,8 +128,8 @@ if __name__ == "__main__":
         "warmup": 400,
     })
     pl.seed_everything(cfg.seed)
-    tsp_model = TSPModel(cfg)
-    # tsp_model = TSPModel.load_from_checkpoint(cfg.resume_checkpoint)
+    # tsp_model = TSPModel(cfg)
+    tsp_model = TSPModel.load_from_checkpoint(cfg.resume_checkpoint)
     
     # build trainer
     trainer = pl.Trainer(
