@@ -229,6 +229,8 @@ class Embeddings(nn.Module):
         elif embedding_type == "decoder":
             self.lut = get_decoder_embedding
             self.w = nn.Linear(240, d_model)
+        elif embedding_type == "linear":
+            self.w = nn.Linear(2, d_model)
         else:
             raise ValueError("embedding type should be encoder or decoder not [{embedding_type}]")
 
@@ -237,15 +239,18 @@ class Embeddings(nn.Module):
         x: [B, node_size, 2]
         visited: (only for decoder) [B, node_size]
         """
-        y = []
-        for batch_idx, tsp_instance in enumerate(x):
-            if self.embedding_type == "decoder":
-                y.append(self.lut(tsp_instance, visited[batch_idx]))
-            else:
-                y.append(self.lut(tsp_instance))
-        y = torch.stack(y, dim=0)
-        y = self.w(y).relu()
-        return y
+        if self.embedding_type == "linear":
+            return self.w(x).relu()
+        else:
+            y = []
+            for batch_idx, tsp_instance in enumerate(x):
+                if self.embedding_type == "decoder":
+                    y.append(self.lut(tsp_instance, visited[batch_idx]))
+                else:
+                    y.append(self.lut(tsp_instance))
+            y = torch.stack(y, dim=0)
+            y = self.w(y).relu()
+            return y
 
 class EncoderPositionalEncoding(nn.Module):
     "Implement the Encoder PE function."
@@ -313,10 +318,10 @@ def make_model(src_sz, tgt_sz, N=6, d_model=128, d_ff=512, h=8, dropout=0.1):
     model = EncoderDecoder(
         encoder=Encoder(EncoderLayer(d_model, c(attn), c(ff), dropout), N),
         decoder=Decoder(DecoderLayer(d_model, c(attn), c(attn), c(ff), dropout), N),
-        src_embed=Embeddings(d_model, "encoder"),
+        src_embed=Embeddings(d_model, "linear"), # encoder
         encoder_pe=EncoderPositionalEncoding(d_model, 2, dropout),
         # tgt_embed=Embeddings(d_model, "decoder"),
-        tgt_embed=Embeddings(d_model, "encoder"),
+        tgt_embed=Embeddings(d_model, "linear"), # encoder
         decoder_pe=DecoderPositionalEncoding(d_model, dropout, 10000),
         generator=Generator(d_model, tgt_sz),
     )

@@ -31,7 +31,6 @@ def rate(step, model_size, factor, warmup):
 class TSPModel(pl.LightningModule):
     def __init__(self, cfg):
         super().__init__()
-        self.cfg = cfg
         self.model = make_model(
             src_sz=cfg.node_size, 
             tgt_sz=cfg.node_size, 
@@ -44,9 +43,13 @@ class TSPModel(pl.LightningModule):
         self.automatic_optimization = False
         criterion = LabelSmoothing(size=cfg.node_size, smoothing=cfg.smoothing)
         self.loss_compute = SimpleLossCompute(self.model.generator, criterion, cfg.node_size)
-        self.save_hyperparameters(cfg)  # save config file with pytorch lightening
+        self.set_cfg(cfg)
         self.train_outputs = []
         self.val_outputs = []
+        
+    def set_cfg(self, cfg):
+        self.cfg = cfg
+        self.save_hyperparameters(cfg)  # save config file with pytorch lightening
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.cfg.lr, betas=self.cfg.betas, eps=self.cfg.eps)
@@ -176,8 +179,8 @@ class TSPModel(pl.LightningModule):
             
 if __name__ == "__main__":
     cfg = OmegaConf.create({
-        "train_data_path": "./tsp20_test_concorde.txt",
-        "val_data_path": "./tsp20_test_concorde.txt",
+        "train_data_path": "./reordered_tsp20_train_concorde.txt",
+        "val_data_path": "./reordered_tsp20_test_concorde.txt",
         "node_size": 20,
         "train_batch_size": 16,
         "val_batch_size": 16,

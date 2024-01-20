@@ -21,7 +21,6 @@ from loss import SimpleLossCompute, LabelSmoothing
 class TSPModel(pl.LightningModule):
     def __init__(self, cfg):
         super().__init__()
-        self.cfg = cfg
         self.model = make_model(
             src_sz=cfg.node_size, 
             tgt_sz=cfg.node_size, 
@@ -33,9 +32,13 @@ class TSPModel(pl.LightningModule):
         )
         criterion = LabelSmoothing(size=cfg.node_size, smoothing=cfg.smoothing)
         self.loss_compute = SimpleLossCompute(self.model.generator, criterion, cfg.node_size)
-        self.save_hyperparameters(cfg)  # save config file with pytorch lightening
+        self.set_cfg(cfg)
         self.val_outputs = []
         self.test_outputs = []
+        
+    def set_cfg(self, cfg):
+        self.cfg = cfg
+        self.save_hyperparameters(cfg)  # save config file with pytorch lightening
 
     def test_dataloader(self):
         test_dataset = TSPDataset(self.cfg.val_data_path)
@@ -106,8 +109,8 @@ class TSPModel(pl.LightningModule):
 
 if __name__ == "__main__":
     cfg = OmegaConf.create({
-        "train_data_path": "./tsp20_test_concorde.txt",
-        "val_data_path": "./tsp20_test_concorde.txt",
+        "train_data_path": "./reordered_tsp20_train_concorde.txt",
+        "val_data_path": "./reordered_tsp20_test_concorde.txt",
         "node_size": 20,
         "train_batch_size": 1,
         "val_batch_size": 1,
@@ -128,8 +131,11 @@ if __name__ == "__main__":
         "warmup": 400,
     })
     pl.seed_everything(cfg.seed)
+    
     # tsp_model = TSPModel(cfg)
+    
     tsp_model = TSPModel.load_from_checkpoint(cfg.resume_checkpoint)
+    tsp_model.set_cfg(cfg)
     
     # build trainer
     trainer = pl.Trainer(
