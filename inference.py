@@ -34,16 +34,19 @@ class TSPModel(pl.LightningModule):
         self.loss_compute = SimpleLossCompute(self.model.generator, criterion, cfg.node_size)
         self.set_cfg(cfg)
         self.val_outputs = []
-        self.test_outputs = []
+        
+        self.test_corrects = []
+        self.test_optimal_tour_distances = []
+        self.test_predicted_tour_distances = []
         
     def set_cfg(self, cfg):
         self.cfg = cfg
         self.save_hyperparameters(cfg)  # save config file with pytorch lightening
 
     def test_dataloader(self):
-        test_dataset = TSPDataset(self.cfg.val_data_path)
+        self.test_dataset = TSPDataset(self.cfg.val_data_path)
         test_dataloader = DataLoader(
-            test_dataset, 
+            self.test_dataset, 
             batch_size = self.cfg.val_batch_size, 
             shuffle = False, 
             collate_fn = collate_fn,
@@ -76,45 +79,86 @@ class TSPModel(pl.LightningModule):
                 visited_mask[torch.arange(batch_size), next_word] = True
                 ys = torch.cat([ys, next_word.unsqueeze(-1)], dim=1)
         
-        total = reduce((lambda x, y: x * y), ys.shape)
-        correct = (ys == tsp_tours).sum()
         
-        result = {"correct": correct, "total": total}
+        correct = (ys == tsp_tours).sum(-1)
+        optimal_tour_distance = self.get_tour_distance(src, tsp_tours)
+        predicted_tour_distance = self.get_tour_distance(src, ys)
         
-        self.test_outputs.append(result)
+        result = {
+            "correct": correct.tolist(),
+            "optimal_tour_distance": optimal_tour_distance.tolist(),
+            "predicted_tour_distance": predicted_tour_distance.tolist(),
+            }    
+        
+        self.test_corrects.extend(result["correct"])
+        self.test_optimal_tour_distances.extend(result["optimal_tour_distance"])
+        self.test_predicted_tour_distances.extend(result["predicted_tour_distance"])
         
         if self.trainer.is_global_zero:
-            print(ys[0])
-            print(tsp_tours[0])
-            print(result)
+            print("predicted tour: ", ys[0].tolist())
+            print("optimal tour: ", tsp_tours[0].tolist())
+            print("opt, pred tour distance: ", optimal_tour_distance[0].item(), predicted_tour_distance[0].item())
+            print("optimality gap: ", ((predicted_tour_distance[0].item() - optimal_tour_distance[0].item()) / optimal_tour_distance[0].item()) * 100, "%")
+            print("node prediction [hit ratio]: ", (correct[0].item() / self.cfg.node_size) * 100 , "%")
             print()
         
         return result
+    
+    def get_tour_distance(self, graph, tour):
+        # graph.shape = [B, N, 2]
+        # tour.shape = [B, N]
+
+        shp = graph.shape
+        gathering_index = tour.unsqueeze(-1).expand(*shp)
+        ordered_seq = graph.gather(dim = 1, index = gathering_index)
+        rolled_seq = ordered_seq.roll(dims = 1, shifts = -1)
+        segment_lengths = ((ordered_seq - rolled_seq) ** 2).sum(-1).sqrt() # [B, N]
+        group_travel_distances = segment_lengths.sum(-1)
+        return group_travel_distances
+
+    def flatten_list(self, nested_list):
+        flat_list = []
+        for sublist in nested_list:
+            flat_list.extend(sublist)
+        return flat_list
         
     def on_test_epoch_end(self):
-        outputs = self.all_gather(self.test_outputs)
-        self.test_outputs.clear()
+        corrects = self.all_gather(self.test_corrects)
+        optimal_tour_distances = self.all_gather(self.test_optimal_tour_distances)
+        predicted_tour_distances = self.all_gather(self.test_predicted_tour_distances)
+        
+        self.test_corrects.clear()
+        self.test_optimal_tour_distances.clear()
+        self.test_predicted_tour_distances.clear()
         
         if self.trainer.is_global_zero:
-            correct = torch.stack([x['correct'] for x in outputs]).sum()
-            total = torch.stack([x['total'] for x in outputs]).sum()
-            accuracy = (correct / total) * 100
+            corrects = torch.stack(corrects)
+            optimal_tour_distances = torch.stack(optimal_tour_distances)
+            predicted_tour_distances = torch.stack(predicted_tour_distances)
             
+            correct = corrects.sum().item()
+            total = self.cfg.node_size * len(self.test_dataset)
+            hit_ratio = (correct / total) * 100
+            mean_optimal_tour_distance = optimal_tour_distances.sum().item() / len(self.test_dataset)
+            mean_predicted_tour_distance = predicted_tour_distances.sum().item() / len(self.test_dataset)
+            mean_opt_gap = (mean_predicted_tour_distance - mean_optimal_tour_distance) / mean_optimal_tour_distance * 100
             self.print(
-                f"correct={correct}",
-                f"total={total}",
-                f"accuracy={accuracy}"
+                f"\ncorrect={correct}",
+                f"\ntotal={total}",
+                f"\nnode prediction(hit ratio) = {hit_ratio} %",
+                f"\nmean_optimal_tour_distance = {mean_optimal_tour_distance}",
+                f"\nmean_predicted_tour_distance = {mean_predicted_tour_distance}",
+                f"\nmean_opt_gap = {mean_opt_gap}  %",
             )
-
 
 if __name__ == "__main__":
     cfg = OmegaConf.create({
         "train_data_path": "./reordered_tsp20_train_concorde.txt",
         "val_data_path": "./reordered_tsp20_test_concorde.txt",
         "node_size": 20,
-        "train_batch_size": 1,
-        "val_batch_size": 1,
-        "resume_checkpoint": "/home/CycleFormer/logs/lightning_logs/version_1/checkpoints/TSP20-epoch=378-val_loss=2.7153.ckpt",
+        "train_batch_size": 80,
+        "val_batch_size": 80,
+        "resume_checkpoint": "/home/jpseo99/CycleFormer/logs/lightning_logs/version_0/checkpoints/TSP20-epoch=150-val_loss=6.0511.ckpt",
         "gpus": [0, 1, 2, 3],
         "max_epochs": 20,
         "num_layers": 6,
