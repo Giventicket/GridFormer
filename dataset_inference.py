@@ -79,7 +79,7 @@ class TSPDataset(Dataset):
             self.src.append(tsp_instance)
             self.tgt.append(torch.tensor([tsp_tour[0]], dtype = torch.long))
             visited_mask = torch.zeros(self.max_node_size, dtype = torch.bool)
-            visited_mask[0] = True
+            visited_mask[self.tgt[-1][0]] = True
             self.visited_mask.append(visited_mask)
         return
 

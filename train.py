@@ -179,8 +179,8 @@ class TSPModel(pl.LightningModule):
             
 if __name__ == "__main__":
     cfg = OmegaConf.create({
-        "train_data_path": "./reordered_tsp20_train_concorde.txt", # reordered_
-        "val_data_path": "./reordered_tsp20_test_concorde.txt", # reordered_
+        "train_data_path": "./reordered_tsp20_train_concorde.txt", # reordered(tour_only)_
+        "val_data_path": "./reordered_tsp20_test_concorde.txt", # reordered(tour_only)_
         "node_size": 20,
         "train_batch_size": 16,
         "val_batch_size": 16,
