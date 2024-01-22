@@ -53,9 +53,9 @@ class EncoderDecoder(nn.Module):
         batch_indices_valid = batch_indices[valid_indices]
         sequence_indices_valid = sequence_indices[valid_indices]
         
-        tgt_embeddings = torch.zeros(B, V, E).to(device)
+        tgt_embeddings = torch.zeros(B, V, E).to(device = device, dtype = whole_embeddings.dtype)
         tgt_embeddings[batch_indices_valid, sequence_indices_valid, :] = whole_embeddings[batch_indices_valid, tgt_valid, :]
-        tgt_embeddings = self.decoder_pe(tgt_embeddings)
+        # tgt_embeddings = self.decoder_pe(tgt_embeddings)
         
         return self.decoder(tgt_embeddings, memory, tgt_mask)
 
