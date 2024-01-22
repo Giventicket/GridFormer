@@ -1,4 +1,4 @@
-*.txt
+# *.txt
 logs/
 trained_model_and_data/
 __pycache__/
