@@ -14,8 +14,11 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from torch.utils.data import DataLoader, Dataset
 
 from dataset import TSPDataset, collate_fn, make_tgt_mask
+from dataset_inference import TSPDataset as TSPDataset_Val
+from dataset_inference import collate_fn as collate_fn_val
+
 from model import make_model, subsequent_mask
-from loss import SimpleLossCompute, LabelSmoothing
+from loss import SimpleLossComputeWithMask, LabelSmoothingWithMask, SimpleLossCompute, LabelSmoothing
 
 
 def rate(step, model_size, factor, warmup):
@@ -41,11 +44,19 @@ class TSPModel(pl.LightningModule):
             dropout=cfg.dropout
         )
         self.automatic_optimization = False
-        criterion = LabelSmoothing(size=cfg.node_size, smoothing=cfg.smoothing)
-        self.loss_compute = SimpleLossCompute(self.model.generator, criterion, cfg.node_size)
+        
+        # criterion = LabelSmoothingWithMask(size=cfg.node_size, smoothing=cfg.smoothing)
+        # self.loss_compute = SimpleLossComputeWithMask(self.model.generator, criterion, cfg.node_size)
+    
+        criterion = LabelSmoothing(size=cfg.node_size, padding_idx = -1, smoothing=cfg.smoothing)
+        self.loss_compute = SimpleLossCompute(self.model.generator, criterion)
+        
         self.set_cfg(cfg)
         self.train_outputs = []
-        self.val_outputs = []
+        
+        self.val_corrects = []
+        self.val_optimal_tour_distances = []
+        self.val_predicted_tour_distances = []
         
     def set_cfg(self, cfg):
         self.cfg = cfg
@@ -71,12 +82,12 @@ class TSPModel(pl.LightningModule):
         return train_dataloader
 
     def val_dataloader(self):
-        val_dataset = TSPDataset(self.cfg.val_data_path)
+        self.val_dataset = TSPDataset_Val(self.cfg.val_data_path)
         val_dataloader = DataLoader(
-            val_dataset, 
+            self.val_dataset, 
             batch_size = self.cfg.val_batch_size, 
             shuffle = False, 
-            collate_fn = collate_fn,
+            collate_fn = collate_fn_val,
             pin_memory=True
         )
         return val_dataloader
@@ -94,7 +105,9 @@ class TSPModel(pl.LightningModule):
         
         self.model.train()
         out = self.model(src, tgt, tgt_mask) # [B, V, E]
-        loss = self.loss_compute(out, tgt_y, visited_mask, ntokens) # [B, V, E], [B, V]
+        
+        # loss = self.loss_compute(out, tgt_y, visited_mask, ntokens) # [B, V, E], [B, V]
+        loss = self.loss_compute(out, tgt_y, ntokens) # [B, V, E], [B, V]
 
         training_step_outputs = [l.item() for l in loss]
         self.train_outputs.extend(training_step_outputs)
@@ -127,60 +140,117 @@ class TSPModel(pl.LightningModule):
             train_loss = torch.stack(outputs).mean()
             train_time = time.time() - self.train_start_time
             self.print(
-                f"Epoch {self.current_epoch}: ",
+                f"##############Train: Epoch {self.current_epoch}###################",
                 "train_loss={:.03f}, ".format(train_loss),
                 "train time={:.03f}".format(train_time),
+                f"##################################################################\n",
             )
             
-    def validate_all(self, batch):
+    def validation_step(self, batch, batch_idx):
         src = batch["src"]
         tgt = batch["tgt"]
         visited_mask = batch["visited_mask"]
-        tgt_y = batch["tgt_y"]
         ntokens = batch["ntokens"]
         tgt_mask = batch["tgt_mask"]
+        tsp_tours = batch["tsp_tours"]
+        
+        batch_size = tsp_tours.shape[0]
         
         self.model.eval()
-        out = self.model(src, tgt, tgt_mask)
-        loss = self.loss_compute(out, tgt_y, visited_mask, ntokens) # [B, V, E], [B, V]
-        
-        return loss
-
-    def validation_step(self, batch, batch_idx):
         with torch.no_grad():
-            loss = self.validate_all(batch)
+            memory = self.model.encode(src)
+            ys = tgt.clone()
+            visited_mask = visited_mask.clone()
+            for i in range(self.cfg.node_size - 1):
+                # memory, tgt, tgt_mask
+                tgt_mask = subsequent_mask(ys.size(1)).type(torch.bool).to(src.device)
+                out = self.model.decode(memory, src, ys, tgt_mask)
+                prob = self.model.generator(out[:, -1], visited_mask)
+                _, next_word = torch.max(prob, dim=1)
+                
+                visited_mask[torch.arange(batch_size), next_word] = True
+                ys = torch.cat([ys, next_word.unsqueeze(-1)], dim=1)
+        
+        
+        correct = (ys == tsp_tours).sum(-1)
+        optimal_tour_distance = self.get_tour_distance(src, tsp_tours)
+        predicted_tour_distance = self.get_tour_distance(src, ys)
+        
+        result = {
+            "correct": correct.tolist(),
+            "optimal_tour_distance": optimal_tour_distance.tolist(),
+            "predicted_tour_distance": predicted_tour_distance.tolist(),
+            }    
+        
+        self.val_corrects.extend(result["correct"])
+        self.val_optimal_tour_distances.extend(result["optimal_tour_distance"])
+        self.val_predicted_tour_distances.extend(result["predicted_tour_distance"])
+        
+        return result
+    
+    def get_tour_distance(self, graph, tour):
+        # graph.shape = [B, N, 2]
+        # tour.shape = [B, N]
 
-        validation_step_outputs = [l.item() for l in loss]
-        self.val_outputs.extend(validation_step_outputs)
-        return {"loss": loss.mean()}
+        shp = graph.shape
+        gathering_index = tour.unsqueeze(-1).expand(*shp)
+        ordered_seq = graph.gather(dim = 1, index = gathering_index)
+        rolled_seq = ordered_seq.roll(dims = 1, shifts = -1)
+        segment_lengths = ((ordered_seq - rolled_seq) ** 2).sum(-1).sqrt() # [B, N]
+        group_travel_distances = segment_lengths.sum(-1)
+        return group_travel_distances
 
     def on_validation_epoch_start(self) -> None:
         if self.trainer.is_global_zero:
             self.validation_start_time = time.time()
 
     def on_validation_epoch_end(self):
-        outputs = self.all_gather(self.val_outputs)
-        self.val_outputs.clear()
-        val_loss = torch.stack(outputs).mean()
+        corrects = self.all_gather(sum(self.val_corrects))
+        optimal_tour_distances = self.all_gather(sum(self.val_optimal_tour_distances))
+        predicted_tour_distances = self.all_gather(sum(self.val_predicted_tour_distances))
+        
+        self.val_corrects.clear()
+        self.val_optimal_tour_distances.clear()
+        self.val_predicted_tour_distances.clear()
+        
+        correct = corrects.sum().item()
+        total = self.cfg.node_size * len(self.val_dataset)
+        hit_ratio = (correct / total) * 100
+        mean_optimal_tour_distance = optimal_tour_distances.sum().item() / len(self.val_dataset)
+        mean_predicted_tour_distance = predicted_tour_distances.sum().item() / len(self.val_dataset)
+        mean_opt_gap = (mean_predicted_tour_distance - mean_optimal_tour_distance) / mean_optimal_tour_distance * 100
         
         self.log(
-            name = "val_loss",
-            value = val_loss,
+            name = "opt_gap",
+            value = mean_opt_gap,
+            prog_bar = True,
+            sync_dist=True
+        )
+        
+        self.log(
+            name = "hit_ratio",
+            value = hit_ratio,
             prog_bar = True,
         )
         
         if self.trainer.is_global_zero:
             validation_time = time.time() - self.validation_start_time
             self.print(
-                f"\nEpoch {self.current_epoch}: ",
-                "val_loss={:.03f}, ".format(val_loss),
+                f"##############Validation: Epoch {self.current_epoch}##############",
                 "validation time={:.03f}".format(validation_time),
+                f"\ncorrect={correct}",
+                f"\ntotal={total}",
+                f"\nnode prediction(hit ratio) = {hit_ratio} %",
+                f"\nmean_optimal_tour_distance = {mean_optimal_tour_distance}",
+                f"\nmean_predicted_tour_distance = {mean_predicted_tour_distance}",
+                f"\nmean_opt_gap = {mean_opt_gap}  %",
+                f"##################################################################\n",
             )
             
 if __name__ == "__main__":
     cfg = OmegaConf.create({
-        "train_data_path": "./reordered_tsp20_train_concorde.txt", # reordered(tour_only)_
-        "val_data_path": "./reordered_tsp20_test_concorde.txt", # reordered(tour_only)_
+        "train_data_path": "./tsp20_test_concorde.txt", # reordered(tour_only)_
+        "val_data_path": "./tsp20_train_concorde.txt", # reordered(tour_only)_
         "node_size": 20,
         "train_batch_size": 16,
         "val_batch_size": 16,
@@ -204,8 +274,8 @@ if __name__ == "__main__":
     tsp_model = TSPModel(cfg)
 
     checkpoint_callback = ModelCheckpoint(
-        monitor = "val_loss",
-        filename = f'TSP{cfg.node_size}-' + "{epoch:02d}-{val_loss:.4f}",
+        monitor = "opt_gap",
+        filename = f'TSP{cfg.node_size}-' + "{epoch:02d}-{opt_gap:.4f}",
         save_top_k=3,
         mode="min",
         every_n_epochs=1,
@@ -226,6 +296,7 @@ if __name__ == "__main__":
         enable_checkpointing=cfg.resume_checkpoint,
         logger=[tb_logger],
         callbacks=[checkpoint_callback],
+        check_val_every_n_epoch = 1
         # strategy="ddp_find_unused_parameters_true",
     )
 

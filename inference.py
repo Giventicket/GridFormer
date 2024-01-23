@@ -16,7 +16,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from dataset_inference import TSPDataset, collate_fn, make_tgt_mask
 from model import make_model, subsequent_mask
-from loss import SimpleLossCompute, LabelSmoothing
+from loss import SimpleLossComputeWithMask, LabelSmoothingWithMask, SimpleLossCompute, LabelSmoothing
 
 class TSPModel(pl.LightningModule):
     def __init__(self, cfg):
@@ -30,10 +30,14 @@ class TSPModel(pl.LightningModule):
             h=cfg.h, 
             dropout=cfg.dropout
         )
-        criterion = LabelSmoothing(size=cfg.node_size, smoothing=cfg.smoothing)
-        self.loss_compute = SimpleLossCompute(self.model.generator, criterion, cfg.node_size)
+        
+        # criterion = LabelSmoothingWithMask(size=cfg.node_size, smoothing=cfg.smoothing)
+        # self.loss_compute = SimpleLossComputeWithMask(self.model.generator, criterion, cfg.node_size)
+    
+        criterion = LabelSmoothing(size=cfg.node_size, padding_idx = -1, smoothing=cfg.smoothing)
+        self.loss_compute = SimpleLossCompute(self.model.generator, criterion)
+        
         self.set_cfg(cfg)
-        self.val_outputs = []
         
         self.test_corrects = []
         self.test_optimal_tour_distances = []
@@ -95,12 +99,14 @@ class TSPModel(pl.LightningModule):
         self.test_predicted_tour_distances.extend(result["predicted_tour_distance"])
         
         if self.trainer.is_global_zero:
-            print("predicted tour: ", ys[0].tolist())
-            print("optimal tour: ", tsp_tours[0].tolist())
-            print("opt, pred tour distance: ", optimal_tour_distance[0].item(), predicted_tour_distance[0].item())
-            print("optimality gap: ", ((predicted_tour_distance[0].item() - optimal_tour_distance[0].item()) / optimal_tour_distance[0].item()) * 100, "%")
-            print("node prediction [hit ratio]: ", (correct[0].item() / self.cfg.node_size) * 100 , "%")
-            print()
+            for idx in range(batch_size):
+                print()
+                print("predicted tour: ", ys[idx].tolist())
+                print("optimal tour: ", tsp_tours[idx].tolist())
+                print("opt, pred tour distance: ", optimal_tour_distance[idx].item(), predicted_tour_distance[idx].item())
+                print("optimality gap: ", ((predicted_tour_distance[idx].item() - optimal_tour_distance[idx].item()) / optimal_tour_distance[idx].item()) * 100, "%")
+                print("node prediction [hit ratio]: ", (correct[idx].item() / self.cfg.node_size) * 100 , "%")
+                print()
         
         return result
     
@@ -115,13 +121,7 @@ class TSPModel(pl.LightningModule):
         segment_lengths = ((ordered_seq - rolled_seq) ** 2).sum(-1).sqrt() # [B, N]
         group_travel_distances = segment_lengths.sum(-1)
         return group_travel_distances
-
-    def flatten_list(self, nested_list):
-        flat_list = []
-        for sublist in nested_list:
-            flat_list.extend(sublist)
-        return flat_list
-        
+    
     def on_test_epoch_end(self):
         corrects = self.all_gather(self.test_corrects)
         optimal_tour_distances = self.all_gather(self.test_optimal_tour_distances)
@@ -153,12 +153,12 @@ class TSPModel(pl.LightningModule):
 
 if __name__ == "__main__":
     cfg = OmegaConf.create({
-        "train_data_path": "./reordered(tour_only)_tsp20_train_concorde.txt",
-        "val_data_path": "./reordered(tour_only)_tsp20_test_concorde.txt", # ./reordered_tsp20_train_concorde.txt
+        "train_data_path": "./reordered_tsp20_train_concorde.txt", # reordered(tour_only)_
+        "val_data_path": "./reordered_tsp20_test_concorde.txt", # reordered(tour_only)_
         "node_size": 20,
         "train_batch_size": 80,
         "val_batch_size": 80,
-        "resume_checkpoint": "./logs/lightning_logs/version_6/checkpoints/TSP20-epoch=65-val_loss=25.9200.ckpt",
+        "resume_checkpoint": "./logs/lightning_logs/version_0/checkpoints/TSP50-epoch=617-val_loss=11.9434.ckpt",
         "gpus": [0, 1, 2, 3],
         "max_epochs": 20,
         "num_layers": 6,

@@ -115,7 +115,7 @@ class TSPImageDataset(torch.utils.data.Dataset):
 
 
 if __name__ == "__main__":
-    data_file = "tsp20_test_concorde.txt"
+    data_file = "tsp50_test_concorde.txt"
     images = TSPImageDataset(
         data_file=data_file, img_size=640, point_radius=5, point_color=250, line_thickness=2, line_color=200
     )
