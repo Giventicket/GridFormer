@@ -18,7 +18,7 @@ class LabelSmoothingWithMask(nn.Module):
     "Implement label smoothing."
 
     def __init__(self, size, smoothing=0.0):
-        super(LabelSmoothing, self).__init__()
+        super(LabelSmoothingWithMask, self).__init__()
         self.criterion = nn.KLDivLoss(reduction="sum")
         self.confidence = 1.0 - smoothing
         self.smoothing = smoothing
@@ -47,37 +47,35 @@ class SimpleLossCompute:
         self.generator = generator
         self.criterion = criterion
 
-    def __call__(self, x, y, norm):
+    def __call__(self, x, y_t, norm):
         x = self.generator(x)
-        sloss = (
-            self.criterion(
-                x.reshape(-1, x.size(-1)), y.reshape(-1)
-            )
-            / norm
-        )
+        _, _, max_node_size = x.shape
+        sloss = self.criterion(x.reshape(-1, max_node_size), y_t.contiguous().reshape(-1)) / norm
         return sloss
     
-
 class LabelSmoothing(nn.Module):
     "Implement label smoothing."
 
-    def __init__(self, size, padding_idx, smoothing=0.0):
+    def __init__(self, size, smoothing=0.0):
         super(LabelSmoothing, self).__init__()
         self.criterion = nn.KLDivLoss(reduction="sum")
-        self.padding_idx = padding_idx
         self.confidence = 1.0 - smoothing
         self.smoothing = smoothing
         self.size = size
-        self.true_dist = None
 
     def forward(self, x, target):
-        assert x.size(1) == self.size
-        true_dist = x.data.clone()
-        true_dist.fill_(self.smoothing / (self.size - 1))
-        true_dist.scatter_(1, target.data.unsqueeze(1), self.confidence)
-        true_dist[:, self.padding_idx] = 0
-        mask = torch.nonzero(target.data == self.padding_idx)
+        T, N = x.shape
+        device = x.device
+        
+        batch_indices = torch.arange(T, device = device, dtype=torch.long)
+        node_indices = torch.arange(N, device = device, dtype=torch.long)
+        
+        true_dist = torch.zeros_like(x, device = device) # [T, N]
+        true_dist[batch_indices.unsqueeze(-1).repeat(1, N).reshape(-1), node_indices.unsqueeze(0).repeat(T, 1).reshape(-1)] = self.smoothing / (N - 1) # [T, N]
+        true_dist[batch_indices, target[batch_indices]] = self.confidence
+        
+        mask = torch.nonzero(target == -1)
         if mask.dim() > 0:
             true_dist.index_fill_(0, mask.squeeze(), 0.0)
-        self.true_dist = true_dist
-        return self.criterion(x, true_dist.clone().detach())
+        
+        return self.criterion(x, true_dist)

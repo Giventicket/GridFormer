@@ -45,11 +45,11 @@ class TSPModel(pl.LightningModule):
         )
         self.automatic_optimization = False
         
-        # criterion = LabelSmoothingWithMask(size=cfg.node_size, smoothing=cfg.smoothing)
-        # self.loss_compute = SimpleLossComputeWithMask(self.model.generator, criterion, cfg.node_size)
+        criterion = LabelSmoothingWithMask(size=cfg.node_size, smoothing=cfg.smoothing)
+        self.loss_compute = SimpleLossComputeWithMask(self.model.generator, criterion, cfg.node_size)
     
-        criterion = LabelSmoothing(size=cfg.node_size, padding_idx = -1, smoothing=cfg.smoothing)
-        self.loss_compute = SimpleLossCompute(self.model.generator, criterion)
+        # criterion = LabelSmoothing(size=cfg.node_size, smoothing=cfg.smoothing)
+        # self.loss_compute = SimpleLossCompute(self.model.generator, criterion)
         
         self.set_cfg(cfg)
         self.train_outputs = []
@@ -106,8 +106,8 @@ class TSPModel(pl.LightningModule):
         self.model.train()
         out = self.model(src, tgt, tgt_mask) # [B, V, E]
         
-        # loss = self.loss_compute(out, tgt_y, visited_mask, ntokens) # [B, V, E], [B, V]
-        loss = self.loss_compute(out, tgt_y, ntokens) # [B, V, E], [B, V]
+        loss = self.loss_compute(out, tgt_y, visited_mask, ntokens) # [B, V, E], [B, V]
+        # loss = self.loss_compute(out, tgt_y, ntokens) # [B, V, E], [B, V]
 
         training_step_outputs = [l.item() for l in loss]
         self.train_outputs.extend(training_step_outputs)
@@ -249,8 +249,9 @@ class TSPModel(pl.LightningModule):
             
 if __name__ == "__main__":
     cfg = OmegaConf.create({
-        "train_data_path": "./tsp20_test_concorde.txt", # reordered(tour_only)_
-        "val_data_path": "./tsp20_train_concorde.txt", # reordered(tour_only)_
+        "memo": "no decoder pe",
+        "train_data_path": "./reordered_tsp20_train_concorde(two_way).txt", # reordered(tour_only)_
+        "val_data_path": "./reordered_tsp20_test_concorde.txt", # reordered(tour_only)_
         "node_size": 20,
         "train_batch_size": 16,
         "val_batch_size": 16,
@@ -276,11 +277,12 @@ if __name__ == "__main__":
     checkpoint_callback = ModelCheckpoint(
         monitor = "opt_gap",
         filename = f'TSP{cfg.node_size}-' + "{epoch:02d}-{opt_gap:.4f}",
+        # save_top_k=cfg.max_epochs,
         save_top_k=3,
         mode="min",
         every_n_epochs=1,
     )
-
+    
     loggers = []
     tb_logger = TensorBoardLogger("logs")
     

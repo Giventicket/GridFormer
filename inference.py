@@ -158,7 +158,7 @@ if __name__ == "__main__":
         "node_size": 20,
         "train_batch_size": 80,
         "val_batch_size": 80,
-        "resume_checkpoint": "./logs/lightning_logs/version_0/checkpoints/TSP50-epoch=617-val_loss=11.9434.ckpt",
+        "resume_checkpoint": "./logs/lightning_logs/version_3/checkpoints/TSP20-epoch=150-opt_gap=11.8979.ckpt",
         "gpus": [0, 1, 2, 3],
         "max_epochs": 20,
         "num_layers": 6,
@@ -176,10 +176,10 @@ if __name__ == "__main__":
     })
     pl.seed_everything(cfg.seed)
     
-    # tsp_model = TSPModel(cfg)
+    tsp_model = TSPModel(cfg)
     
-    tsp_model = TSPModel.load_from_checkpoint(cfg.resume_checkpoint)
-    tsp_model.set_cfg(cfg)
+    # tsp_model = TSPModel.load_from_checkpoint(cfg.resume_checkpoint)
+    # tsp_model.set_cfg(cfg)
     
     # build trainer
     trainer = pl.Trainer(
