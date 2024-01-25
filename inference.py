@@ -31,11 +31,11 @@ class TSPModel(pl.LightningModule):
             dropout=cfg.dropout
         )
         
-        # criterion = LabelSmoothingWithMask(size=cfg.node_size, smoothing=cfg.smoothing)
-        # self.loss_compute = SimpleLossComputeWithMask(self.model.generator, criterion, cfg.node_size)
+        criterion = LabelSmoothingWithMask(size=cfg.node_size, smoothing=cfg.smoothing)
+        self.loss_compute = SimpleLossComputeWithMask(self.model.generator, criterion, cfg.node_size)
     
-        criterion = LabelSmoothing(size=cfg.node_size, padding_idx = -1, smoothing=cfg.smoothing)
-        self.loss_compute = SimpleLossCompute(self.model.generator, criterion)
+        # criterion = LabelSmoothing(size=cfg.node_size, padding_idx = -1, smoothing=cfg.smoothing)
+        # self.loss_compute = SimpleLossCompute(self.model.generator, criterion)
         
         self.set_cfg(cfg)
         
@@ -65,6 +65,7 @@ class TSPModel(pl.LightningModule):
         ntokens = batch["ntokens"]
         tgt_mask = batch["tgt_mask"]
         tsp_tours = batch["tsp_tours"]
+        reversed_tsp_tours = batch["reversed_tsp_tours"]
         
         batch_size = tsp_tours.shape[0]
         
@@ -84,7 +85,16 @@ class TSPModel(pl.LightningModule):
                 ys = torch.cat([ys, next_word.unsqueeze(-1)], dim=1)
         
         
-        correct = (ys == tsp_tours).sum(-1)
+        correct = []
+        for idx in range(batch_size):
+            straight_correct = (ys[idx] == tsp_tours[idx]).sum(-1)
+            reversed_correct = (ys[idx] == reversed_tsp_tours[idx]).sum(-1)
+            if straight_correct < reversed_correct:
+                correct.append(reversed_correct)
+            else:
+                correct.append(straight_correct)
+        
+        correct = torch.tensor(correct)
         optimal_tour_distance = self.get_tour_distance(src, tsp_tours)
         predicted_tour_distance = self.get_tour_distance(src, ys)
         
@@ -98,6 +108,7 @@ class TSPModel(pl.LightningModule):
         self.test_optimal_tour_distances.extend(result["optimal_tour_distance"])
         self.test_predicted_tour_distances.extend(result["predicted_tour_distance"])
         
+        """
         if self.trainer.is_global_zero:
             for idx in range(batch_size):
                 print()
@@ -107,6 +118,7 @@ class TSPModel(pl.LightningModule):
                 print("optimality gap: ", ((predicted_tour_distance[idx].item() - optimal_tour_distance[idx].item()) / optimal_tour_distance[idx].item()) * 100, "%")
                 print("node prediction [hit ratio]: ", (correct[idx].item() / self.cfg.node_size) * 100 , "%")
                 print()
+        """
         
         return result
     
@@ -158,7 +170,7 @@ if __name__ == "__main__":
         "node_size": 20,
         "train_batch_size": 80,
         "val_batch_size": 80,
-        "resume_checkpoint": "./logs/lightning_logs/version_3/checkpoints/TSP20-epoch=150-opt_gap=11.8979.ckpt",
+        "resume_checkpoint": "./logs/lightning_logs/version_7/checkpoints/TSP20-epoch=209-opt_gap=7.4024.ckpt",
         "gpus": [0, 1, 2, 3],
         "max_epochs": 20,
         "num_layers": 6,
@@ -176,10 +188,10 @@ if __name__ == "__main__":
     })
     pl.seed_everything(cfg.seed)
     
-    tsp_model = TSPModel(cfg)
+    # tsp_model = TSPModel(cfg)
     
-    # tsp_model = TSPModel.load_from_checkpoint(cfg.resume_checkpoint)
-    # tsp_model.set_cfg(cfg)
+    tsp_model = TSPModel.load_from_checkpoint(cfg.resume_checkpoint)
+    tsp_model.set_cfg(cfg)
     
     # build trainer
     trainer = pl.Trainer(

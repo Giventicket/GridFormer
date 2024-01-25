@@ -55,7 +55,7 @@ class EncoderDecoder(nn.Module):
         
         tgt_embeddings = torch.zeros(B, V, E).to(device = device, dtype = whole_embeddings.dtype)
         tgt_embeddings[batch_indices_valid, sequence_indices_valid, :] = whole_embeddings[batch_indices_valid, tgt_valid, :]
-        # tgt_embeddings = self.decoder_pe(tgt_embeddings)
+        tgt_embeddings = self.decoder_pe(tgt_embeddings) # delete if no pe
         
         return self.decoder(tgt_embeddings, memory, tgt_mask)
 
@@ -344,8 +344,8 @@ def make_model(src_sz, tgt_sz, N=6, d_model=128, d_ff=512, h=8, dropout=0.1):
         encoder_pe=EncoderPositionalEncoding(d_model, 2, dropout),
         # tgt_embed=Embeddings(d_model, "decoder"),
         tgt_embed=Embeddings(d_model, "linear"), # encoder
-        decoder_pe=DecoderPositionalEncoding(d_model, dropout, 10000),
-        # decoder_pe=OriginalPositionalEncoding(d_model, dropout, 10000),
+        # decoder_pe=DecoderPositionalEncoding(d_model, dropout, 10000),
+        decoder_pe=OriginalPositionalEncoding(d_model, dropout, 10000),
         generator=Generator(d_model, tgt_sz),
     )
 
