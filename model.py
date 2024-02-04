@@ -2,8 +2,6 @@ import torch
 import torch.nn as nn
 import math
 import copy
-from encoder_lut import get_encoder_embedding
-from decoder_lut import get_decoder_embedding
 
 """
 code reference: http://nlp.seas.harvard.edu/annotated-transformer/
@@ -27,36 +25,25 @@ class EncoderDecoder(nn.Module):
 
     def forward(self, src, tgt, tgt_mask):
         "Take in and process masked src and target sequences."
-        return self.decode(self.encode(src), src, tgt, tgt_mask)
+        return self.decode(self.encode(src), tgt, tgt_mask)
 
     def encode(self, src):
         """
         src: [B, node_size, 2], no need for src_mask
         """
         src_embeddings = self.src_embed(src)
-        src_embeddings = self.encoder_pe(src_embeddings, src)
+        if self.encoder_pe is not None:
+            src_embeddings = self.encoder_pe(src_embeddings, src)
         return self.encoder(src_embeddings)
 
-    def decode(self, memory, src, tgt, tgt_mask):
-        whole_embeddings = self.tgt_embed(src)
-        whole_embeddings = self.encoder_pe(whole_embeddings, src)
-        
-        B, N, E = whole_embeddings.shape
-        B, V = tgt.shape
-        
-        valid_indices = (tgt != -1)
-        device = tgt.device
-        batch_indices = torch.arange(B).unsqueeze(-1).expand_as(tgt).to(device) # [B, V]
-        sequence_indices = torch.arange(V).unsqueeze(0).expand_as(tgt).to(device) # [B, V]
-        
-        tgt_valid = tgt[valid_indices]
-        batch_indices_valid = batch_indices[valid_indices]
-        sequence_indices_valid = sequence_indices[valid_indices]
-        
-        tgt_embeddings = torch.zeros(B, V, E).to(device = device, dtype = whole_embeddings.dtype)
-        tgt_embeddings[batch_indices_valid, sequence_indices_valid, :] = whole_embeddings[batch_indices_valid, tgt_valid, :]
-        tgt_embeddings = self.decoder_pe(tgt_embeddings) # delete if no pe
-        
+    def decode(self, memory, tgt, tgt_mask):
+        tgt_embeddings = self.tgt_embed(tgt)
+        if self.decoder_pe is not None:
+            if self.decoder_pe._get_name() == "PositionalEncoding_2D":
+                tgt_embeddings = self.decoder_pe(tgt_embeddings, tgt)
+            else:
+                tgt_embeddings = self.decoder_pe(tgt_embeddings)
+            
         return self.decoder(tgt_embeddings, memory, tgt_mask)
 
 class Generator(nn.Module):
@@ -219,46 +206,22 @@ class PositionwiseFeedForward(nn.Module):
         return self.w_2(self.dropout(self.w_1(x).relu()))
 
 class Embeddings(nn.Module):
-    def __init__(self, d_model, embedding_type):
+    def __init__(self, d_model, vocab):
         super(Embeddings, self).__init__()
-        self.embedding_type = embedding_type
+        self.lut = nn.Embedding(vocab, d_model)
         self.d_model = d_model
-        if embedding_type == "encoder":
-            self.lut = get_encoder_embedding
-            self.w = nn.Linear(128, d_model)
-        elif embedding_type == "decoder":
-            self.lut = get_decoder_embedding
-            self.w = nn.Linear(240, d_model)
-        elif embedding_type == "linear":
-            self.w = nn.Linear(2, d_model)
-        else:
-            raise ValueError("embedding type should be encoder or decoder not [{embedding_type}]")
 
-    def forward(self, x, visited=None):
-        """
-        x: [B, node_size, 2]
-        visited: (only for decoder) [B, node_size]
-        """
-        if self.embedding_type == "linear":
-            return self.w(x).relu()
-        else:
-            y = []
-            for batch_idx, tsp_instance in enumerate(x):
-                if self.embedding_type == "decoder":
-                    y.append(self.lut(tsp_instance, visited[batch_idx]))
-                else:
-                    y.append(self.lut(tsp_instance))
-            y = torch.stack(y, dim=0)
-            y = self.w(y).relu()
-            return y
+    def forward(self, x):
+        return self.lut(x) * math.sqrt(self.d_model)
+    
+class PositionalEncoding_2D(nn.Module):
+    "Implement the 2D PE function."
 
-class EncoderPositionalEncoding(nn.Module):
-    "Implement the Encoder PE function."
-
-    def __init__(self, d_model, T, dropout):
-        super(EncoderPositionalEncoding, self).__init__()
+    def __init__(self, d_model, T, dropout, grid_size):
+        super(PositionalEncoding_2D, self).__init__()
         self.dropout = nn.Dropout(p=dropout)
         self.d_model = d_model
+        self.grid_size = grid_size
 
         # Compute the div_term once.
         div_term = 1 / torch.pow(
@@ -266,21 +229,23 @@ class EncoderPositionalEncoding(nn.Module):
         )  # [batch_size, node_size, 64]
         self.register_buffer("div_term", div_term)
 
-    def forward(self, embeddings, graph):
+    def forward(self, embeddings, grid_indices):
         """
         embeddings: [batch_size, node_size, 128]
         graph: [batch_size, node_size, 2]
         """
-        batch_size, node_size, _ = graph.shape
-        device = graph.device 
-        pe_x = torch.zeros(batch_size, node_size, self.d_model // 2).to(device)  # [batch_size, node_size, 64]
-        pe_y = torch.zeros(batch_size, node_size, self.d_model // 2).to(device)  # [batch_size, node_size, 64]
-        y_term = graph[:, :, 0].unsqueeze(-1) * self.div_term.repeat(
+        batch_size, node_size = grid_indices.shape
+        device = grid_indices.device 
+        pe_x = torch.zeros(batch_size, node_size, self.d_model // 2, device = device)  # [batch_size, node_size, 64]
+        pe_y = torch.zeros(batch_size, node_size, self.d_model // 2, device = device)  # [batch_size, node_size, 64]
+        
+        x_term = ((grid_indices % self.grid_size) / self.grid_size + 1 / (2 * self.grid_size)).unsqueeze(-1) * self.div_term.repeat(
             batch_size, node_size, 1
         )  # [batch_size, node_size, 64]
-        x_term = graph[:, :, 1].unsqueeze(-1) * self.div_term.repeat(
+        y_term = ((grid_indices // self.grid_size) / self.grid_size + 1 / (2 * self.grid_size)).unsqueeze(-1) * self.div_term.repeat(
             batch_size, node_size, 1
         )  # [batch_size, node_size, 64]
+        
         pe_x[:, :, 0::2] = torch.sin(x_term[:, :, 0::2])  # [batch_size, node_size, 32]
         pe_x[:, :, 1::2] = torch.cos(x_term[:, :, 1::2])  # [batch_size, node_size, 32]
         pe_y[:, :, 0::2] = torch.sin(y_term[:, :, 0::2])  # [batch_size, node_size, 32]
@@ -289,25 +254,43 @@ class EncoderPositionalEncoding(nn.Module):
         embeddings = embeddings + pe  # [batch_size, node_size, 128]
         return self.dropout(embeddings)  # [batch_size, node_size, 128]
 
-class DecoderPositionalEncoding(nn.Module):
+class CircularPositionalEncoding(nn.Module):
     "Implement the PE function."
 
-    def __init__(self, d_model, dropout, max_len=10000):
-        super(DecoderPositionalEncoding, self).__init__()
+    def __init__(self, d_model, dropout, node_size):
+        super(CircularPositionalEncoding, self).__init__()
+        
         self.dropout = nn.Dropout(p=dropout)
 
         # Compute the positional encodings once in log space.
-        pe = torch.zeros(max_len, d_model)
-        position = torch.arange(0, max_len).unsqueeze(1)
+        pe = torch.zeros(node_size, d_model)
+        position = torch.arange(0, node_size).unsqueeze(1)
         div_term = torch.exp(torch.arange(0, d_model, 2) * -(math.log(10000.0) / d_model))
-        pe[:, 0::2] = torch.sin(position * div_term + 2 * torch.pi * position / max_len)
-        pe[:, 1::2] = torch.cos(position * div_term + 2 * torch.pi * position / max_len)
+        pe[:, 0::2] = torch.sin(position * div_term + 2 * torch.pi * position / node_size)
+        pe[:, 1::2] = torch.cos(position * div_term + 2 * torch.pi * position / node_size)
         pe = pe.unsqueeze(0)
         self.register_buffer("pe", pe)
 
     def forward(self, x):
         x = x + self.pe[:, : x.size(1)].requires_grad_(False)
         return self.dropout(x)
+    
+class LearnableCircularPositionalEncoding(nn.Module):
+    def __init__(self, d_model, dropout, node_size):
+        super(LearnableCircularPositionalEncoding, self).__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        self.pe = nn.Parameter(torch.zeros(node_size, d_model), requires_grad=True)
+        position = torch.arange(0, node_size).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2) * -(math.log(10000.0) / d_model))
+        with torch.no_grad():
+            self.pe[:, 0::2] = torch.sin(position * div_term + 2 * torch.pi * position / node_size)
+            self.pe[:, 1::2] = torch.cos(position * div_term + 2 * torch.pi * position / node_size)
+
+    def forward(self, x):
+        x = x + self.pe[:x.size(1)].unsqueeze(0)
+        return self.dropout(x)
+
     
 class OriginalPositionalEncoding(nn.Module):
     "Implement the PE function."
@@ -319,9 +302,7 @@ class OriginalPositionalEncoding(nn.Module):
         # Compute the positional encodings once in log space.
         pe = torch.zeros(max_len, d_model)
         position = torch.arange(0, max_len).unsqueeze(1)
-        div_term = torch.exp(
-            torch.arange(0, d_model, 2) * -(math.log(10000.0) / d_model)
-        )
+        div_term = torch.exp(torch.arange(0, d_model, 2) * -(math.log(10000.0) / d_model))
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
         pe = pe.unsqueeze(0)
@@ -331,22 +312,78 @@ class OriginalPositionalEncoding(nn.Module):
         x = x + self.pe[:, : x.size(1)].requires_grad_(False)
         return self.dropout(x)
 
-def make_model(src_sz, tgt_sz, N=6, d_model=128, d_ff=512, h=8, dropout=0.1):
+class LearnablePositionalEncoding(nn.Module):
+    def __init__(self, d_model, dropout, max_len=5000):
+        super(LearnablePositionalEncoding, self).__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        self.pe = nn.Parameter(torch.zeros(max_len, d_model), requires_grad=True)
+        position = torch.arange(0, max_len).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2) * -(math.log(10000.0) / d_model))
+        with torch.no_grad():
+            self.pe[:, 0::2] = torch.sin(position * div_term)
+            self.pe[:, 1::2] = torch.cos(position * div_term)
+
+    def forward(self, x):
+        x = x + self.pe[:x.size(1)].unsqueeze(0)
+        return self.dropout(x)
+
+def make_model(
+    grid_size, 
+    N, 
+    d_model,
+    d_ff, 
+    h, 
+    dropout,
+    encoder_pe_option,
+    decoder_pe_option,
+    use_start_token,
+    share_lut,
+    node_size
+    ):
     "Helper: Construct a model from hyperparameters."
     c = copy.deepcopy
     attn = MultiHeadedAttention(h, d_model)
     ff = PositionwiseFeedForward(d_model, d_ff, dropout)
 
+    src_vocab = grid_size * grid_size
+    if use_start_token:
+        tgt_vocab = grid_size * grid_size + 1
+    else:
+        tgt_vocab = grid_size * grid_size 
+
+    if encoder_pe_option == "pe_2d":
+        encoder_pe = PositionalEncoding_2D(d_model, 2, dropout, grid_size)
+    else:
+        encoder_pe = None
+        
+    if decoder_pe_option == "pe_2d":
+        decoder_pe = PositionalEncoding_2D(d_model, 2, dropout, grid_size)
+    elif decoder_pe_option == "pe_1d_original":
+        decoder_pe = OriginalPositionalEncoding(d_model, dropout, 10000)
+    elif decoder_pe_option == "pe_1d_learnable":
+        decoder_pe = LearnablePositionalEncoding(d_model, dropout, 10000)
+    elif decoder_pe_option == "pe_1d_circular":
+        decoder_pe = CircularPositionalEncoding(d_model, dropout, node_size)
+    elif decoder_pe_option == "pe_1d_learnable_circular":
+        decoder_pe = LearnableCircularPositionalEncoding(d_model, dropout, node_size)
+    else:
+        decoder_pe = None
+        
+    if share_lut:
+        tgt_embed = src_embed = Embeddings(d_model, tgt_vocab)
+    else:
+        tgt_embed = Embeddings(d_model, src_vocab) 
+        src_embed = Embeddings(d_model, tgt_vocab)
+
     model = EncoderDecoder(
-        encoder=Encoder(EncoderLayer(d_model, c(attn), c(ff), dropout), N),
-        decoder=Decoder(DecoderLayer(d_model, c(attn), c(attn), c(ff), dropout), N),
-        src_embed=Embeddings(d_model, "linear"), # encoder
-        encoder_pe=EncoderPositionalEncoding(d_model, 2, dropout),
-        # tgt_embed=Embeddings(d_model, "decoder"),
-        tgt_embed=Embeddings(d_model, "linear"), # encoder
-        # decoder_pe=DecoderPositionalEncoding(d_model, dropout, 10000),
-        decoder_pe=OriginalPositionalEncoding(d_model, dropout, 10000),
-        generator=Generator(d_model, tgt_sz),
+        encoder = Encoder(EncoderLayer(d_model, c(attn), c(ff), dropout), N),
+        decoder = Decoder(DecoderLayer(d_model, c(attn), c(attn), c(ff), dropout), N),
+        src_embed = src_embed,
+        encoder_pe = encoder_pe,
+        tgt_embed = tgt_embed,
+        decoder_pe = decoder_pe,
+        generator = Generator(d_model, tgt_vocab),
     )
 
     # This was important from their code.
