@@ -1,5 +1,7 @@
 # *.txt
 logs/
+lightning_logs/
+dump_old/
 trained_model_and_data/
 __pycache__/
-lightning_logs/
+configs/
