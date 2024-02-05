@@ -38,6 +38,7 @@ if __name__ == "__main__":
 
     if opts.filename is None:
         opts.filename = f"tsp{opts.min_nodes}-{opts.max_nodes}_concorde.txt"
+        # opts.filename = f"tsp{opts.min_nodes}-{opts.max_nodes}_concorde(val).txt"
 
     # Pretty print the run args
     pp.pprint(vars(opts))

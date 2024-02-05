@@ -32,18 +32,18 @@ class TSPImageDataset(torch.utils.data.Dataset):
     points, tour = self.rasterize(idx)
     return points, tour
 
-data_path = "./concorde3.txt"
+data_path = "./tsp50-50_concorde(val).txt"
 
 images = TSPImageDataset(
     data_file = data_path, 
 )
 
-def point2grid(nodes_coord, grid_size = 40):
+def point2grid(nodes_coord, grid_size = 100):
     nodes_coord_scaled = (nodes_coord * grid_size).astype(int)
     grid_indices = nodes_coord_scaled[:, 0] + nodes_coord_scaled[:, 1] * grid_size
     return grid_indices
 
-with open("./tsp20_grid40_train(400000).txt", "w") as file:
+with open("./tsp50_grid100_val.txt", "w") as file:
     for image in images:
         points, tour = image
         tour_points = points[tour - 1]

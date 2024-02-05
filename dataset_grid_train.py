@@ -85,9 +85,9 @@ class TSPDataset(Dataset):
             self.tgt_y.append(tsp_tour[1 : ntoken + 1])
             
             if self.use_start_token:
-                mask = torch.ones(ntoken, self.grid_size * self.grid_size + 1, dtype=torch.int16)
+                mask = torch.ones(ntoken, self.grid_size * self.grid_size + 1, dtype=torch.int8)
             else:
-                mask = torch.ones(ntoken, self.grid_size * self.grid_size, dtype=torch.int16)
+                mask = torch.ones(ntoken, self.grid_size * self.grid_size, dtype=torch.int8)
             
             for v in range(ntoken):
                 mask[: , self.tgt[-1][v]] = mask[: , self.tgt[-1][v]] - 1 # unvisited

@@ -55,7 +55,7 @@ def nearest_neighbor(matrix, start_vertex=0):
     path = [start_vertex]
     total_distance = 0
 
-    for _ in range(n - 1):
+    for _ in range(n):
         current_vertex = path[-1]
         min_distance = float('inf')
         nearest_vertex = None
@@ -92,5 +92,5 @@ opt =  torch.tensor(opt)
 gaps =  torch.tensor(gaps)
 
 gap = ((pred.sum() - opt.sum()) / opt.sum()) * 100
-print(gap.item(), "%")
+# print(gap.item(), "%")
 print(gaps.mean().item() * 100, "%")

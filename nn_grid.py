@@ -64,7 +64,7 @@ def nearest_neighbor(matrix, start_vertex=0):
     path = [start_vertex]
     total_distance = 0
 
-    for _ in range(n - 1):
+    for _ in range(n):
         current_vertex = path[-1]
         min_distance = float('inf')
         nearest_vertex = None
@@ -82,8 +82,8 @@ def nearest_neighbor(matrix, start_vertex=0):
 
     return path[1:], total_distance+back_to_start
 
-data_path = "tsp20_grid40_val.txt"
-grid_size = 40
+data_path = "tsp50_grid100_val.txt"
+grid_size = 100
 rawdata = TSPDataset(data_path, grid_size)
 
 pred = []
