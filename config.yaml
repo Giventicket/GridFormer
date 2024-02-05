@@ -1,12 +1,12 @@
 memo: ""
-test_data_path: "./tsp{node_size}_real_test.txt"
+test_data_path: "./tsp20_real_test.txt"
 node_size: 20
 train_batch_size: 80
 val_batch_size: 80
 test_batch_size: 80
-resume_checkpoint: "./dump_old/lightning_logs/version_12/checkpoints/TSP20-epoch=993-opt_gap=0.1531.ckpt"
+resume_checkpoint: "./logs/lightning_logs/version_12/checkpoints/TSP20-epoch=98-opt_gap=2.2720.ckpt"
 gpus: [0, 1, 2, 3]
-max_epochs: 1000
+max_epochs: 100
 num_layers: 6
 d_model: 128
 d_ff: 512
@@ -19,9 +19,9 @@ betas: [0.9, 0.98]
 eps: 1e-9
 factor: 1.0
 warmup: 400
-grid_size: 40
-encoder_pe_option: "pe_2d" # pe_2d | None
-decoder_pe_option: "pe_1d_circular"
+grid_size: 100
+encoder_pe_option: null # pe_2d | None
+decoder_pe_option: null
 # pe_2d | pe_1d_original | pe_1d_learnable | pe_1d_circular | pe_1d_learnable_circular | None
 use_start_token: false
 share_lut: true

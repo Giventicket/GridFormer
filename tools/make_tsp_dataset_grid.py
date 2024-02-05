@@ -22,14 +22,14 @@ def return_grid_coord(nodes_coord, grid_size):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--min_nodes", type=int, default=20)
-    parser.add_argument("--max_nodes", type=int, default=20)
-    parser.add_argument("--num_samples", type=int, default=400000)
+    parser.add_argument("--min_nodes", type=int, default=50)
+    parser.add_argument("--max_nodes", type=int, default=50)
+    parser.add_argument("--num_samples", type=int, default=100000)
     parser.add_argument("--batch_size", type=int, default=100)
     parser.add_argument("--filename", type=str, default=None)
     parser.add_argument("--solver", type=str, default="concorde")
-    parser.add_argument("--seed", type=int, default=3)
-    parser.add_argument("--grid_size", type=int, default=40)
+    parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument("--grid_size", type=int, default=100)
     opts = parser.parse_args()
 
     assert opts.num_samples % opts.batch_size == 0, "Number of samples must be divisible by batch size"

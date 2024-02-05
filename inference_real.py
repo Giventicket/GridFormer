@@ -190,23 +190,17 @@ class TSPModel(pl.LightningModule):
             total = self.cfg.node_size * len(self.test_dataset)
             hit_ratio = (correct / total) * 100
             
-            mean_optimal_grid_tour_distance = optimal_grid_tour_distances.sum().item() / len(self.test_dataset)
-            mean_predicted_grid_tour_distance = predicted_grid_tour_distances.sum().item() / len(self.test_dataset)
-            mean_grid_opt_gap = (mean_predicted_grid_tour_distance - mean_optimal_grid_tour_distance) / mean_optimal_grid_tour_distance * 100
+            grid_opt_gaps = (predicted_grid_tour_distances - optimal_grid_tour_distances) / optimal_grid_tour_distances
+            mean_grid_opt_gap = grid_opt_gaps.mean().item() * 100
             
-            mean_optimal_real_tour_distance = optimal_real_tour_distances.sum().item() / len(self.test_dataset)
-            mean_predicted_real_tour_distance = predicted_real_tour_distances.sum().item() / len(self.test_dataset)
-            mean_real_opt_gap = (mean_predicted_real_tour_distance - mean_optimal_real_tour_distance) / mean_optimal_real_tour_distance * 100
+            real_opt_gaps = (predicted_real_tour_distances - optimal_real_tour_distances) / optimal_real_tour_distances
+            mean_real_opt_gap = real_opt_gaps.mean().item() * 100
             
             self.print(
                 f"\ncorrect={correct}",
                 f"\ntotal={total}",
                 f"\nnode prediction(hit ratio) = {hit_ratio} %",
-                f"\nmean_optimal_grid_tour_distance = {mean_optimal_grid_tour_distance}",
-                f"\nmean_predicted_grid_tour_distance = {mean_predicted_grid_tour_distance}",
                 f"\nmean_grid_opt_gap = {mean_grid_opt_gap}  %",
-                f"\nmean_optimal_real_tour_distance = {mean_optimal_real_tour_distance}",
-                f"\nmean_predicted_real_tour_distance = {mean_predicted_real_tour_distance}",
                 f"\nmean_real_opt_gap = {mean_real_opt_gap}  %",
             )
 

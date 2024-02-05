@@ -211,9 +211,8 @@ class TSPModel(pl.LightningModule):
         self.val_optimal_tour_distances.clear()
         self.val_predicted_tour_distances.clear()
         
-        mean_optimal_tour_distance = optimal_tour_distances.sum().item() / len(self.val_dataset)
-        mean_predicted_tour_distance = predicted_tour_distances.sum().item() / len(self.val_dataset)
-        mean_opt_gap = (mean_predicted_tour_distance - mean_optimal_tour_distance) / mean_optimal_tour_distance * 100
+        opt_gaps = (predicted_tour_distances - optimal_tour_distances) / optimal_tour_distances
+        mean_opt_gap = opt_gaps.mean().item() * 100
         
         self.log(
             name = "opt_gap",
@@ -227,8 +226,6 @@ class TSPModel(pl.LightningModule):
             self.print(
                 f"##############Validation: Epoch {self.current_epoch}##############",
                 "validation time={:.03f}".format(validation_time),
-                f"\nmean_optimal_tour_distance = {mean_optimal_tour_distance}",
-                f"\nmean_predicted_tour_distance = {mean_predicted_tour_distance}",
                 f"\nmean_opt_gap = {mean_opt_gap}  %",
                 f"##################################################################\n",
             )

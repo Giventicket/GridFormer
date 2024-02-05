@@ -170,15 +170,12 @@ class TSPModel(pl.LightningModule):
             correct = corrects.sum().item()
             total = self.cfg.node_size * len(self.test_dataset)
             hit_ratio = (correct / total) * 100
-            mean_optimal_tour_distance = optimal_tour_distances.sum().item() / len(self.test_dataset)
-            mean_predicted_tour_distance = predicted_tour_distances.sum().item() / len(self.test_dataset)
-            mean_opt_gap = (mean_predicted_tour_distance - mean_optimal_tour_distance) / mean_optimal_tour_distance * 100
+            opt_gaps = (predicted_tour_distances - optimal_tour_distances) / optimal_tour_distances
+            mean_opt_gap = opt_gaps.mean().item() * 100
             self.print(
                 f"\ncorrect={correct}",
                 f"\ntotal={total}",
                 f"\nnode prediction(hit ratio) = {hit_ratio} %",
-                f"\nmean_optimal_tour_distance = {mean_optimal_tour_distance}",
-                f"\nmean_predicted_tour_distance = {mean_predicted_tour_distance}",
                 f"\nmean_opt_gap = {mean_opt_gap}  %",
             )
 
