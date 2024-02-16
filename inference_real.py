@@ -17,7 +17,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from torch.utils.data import DataLoader, Dataset
 
 from dataset_real_inference import TSPDataset, collate_fn, make_tgt_mask
-from model import make_model, subsequent_mask
+from model import make_model, subsequent_mask, CircularPositionalEncoding
 from loss import SimpleLossComputeWithMask, LabelSmoothingWithMask
 
 class TSPModel(pl.LightningModule):
@@ -144,9 +144,7 @@ class TSPModel(pl.LightningModule):
                 print()
                 print("predicted grid tour: ", grid_ys[idx].tolist())
                 print("optimal grid tour: ", grid_tsp_tours[idx].tolist())
-                print("opt, pred grid tour distance: ", optimal_grid_tour_distance[idx].item(), predicted_grid_tour_distance[idx].item())
                 print("grid optimality gap: ", ((predicted_grid_tour_distance[idx].item() - optimal_grid_tour_distance[idx].item()) / optimal_grid_tour_distance[idx].item()) * 100, "%")
-                print("opt, pred real tour distance: ", optimal_real_tour_distance[idx].item(), predicted_real_tour_distance[idx].item())
                 print("real optimality gap: ", ((predicted_real_tour_distance[idx].item() - optimal_real_tour_distance[idx].item()) / optimal_real_tour_distance[idx].item()) * 100, "%")
                 print("node prediction [hit ratio]: ", (correct[idx].item() / self.cfg.node_size) * 100 , "%")
                 print()
@@ -224,7 +222,6 @@ def parse_arguments():
     return args
 
 if __name__ == "__main__":
-    node_size = 20
     args = parse_arguments()
     cfg = OmegaConf.load(args.config)
     
@@ -233,10 +230,12 @@ if __name__ == "__main__":
     
     pl.seed_everything(cfg.seed)
     
-    tsp_model = TSPModel(cfg)
+    # tsp_model = TSPModel(cfg)
     
     tsp_model = TSPModel.load_from_checkpoint(cfg.resume_checkpoint)
     tsp_model.set_cfg(cfg)
+    if cfg.decoder_pe_option in "pe_1d_circular":
+        tsp_model.model.decoder_pe = CircularPositionalEncoding(cfg.d_model, cfg.dropout, cfg.node_size)
     
     # build trainer
     trainer = pl.Trainer(
